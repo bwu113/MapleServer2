@@ -32,9 +32,9 @@ namespace MapleServer2.Packets
             CharacterListPacket.WriteCharacter(player, pWriter);
 
             // Skills
-            pWriter.WriteInt(player.JobId);
+            pWriter.WriteEnum(player.JobCode);
             pWriter.WriteByte(1);
-            pWriter.WriteInt(player.JobGroupId);
+            pWriter.WriteEnum(player.Job);
             JobPacket.WriteSkills(pWriter, player);
 
             // Coords
@@ -114,7 +114,7 @@ namespace MapleServer2.Packets
                 pWriter.WriteByte(); // Separator?
                 pWriter.WriteDeflated(new byte[1], 0, 1); // Badge appearances
 
-                WritePassiveSkills(pWriter);
+                JobPacket.WritePassiveSkills(pWriter, fieldPlayer);
 
                 pWriter.WriteInt();
                 pWriter.WriteInt();
@@ -146,27 +146,6 @@ namespace MapleServer2.Packets
         {
             return PacketWriter.Of(SendOp.FIELD_REMOVE_USER)
                 .WriteInt(player.ObjectId);
-        }
-
-        private static void WritePassiveSkills(PacketWriter pWriter)
-        {
-            pWriter.Write(
-                "01 00 3E FF 5A 00 A4 63 12 02 3E FF 5A 00 D0 71 85 28 D0 71 85 28 0F 38 A0 00 01 00 01 00 00 00 01 00 00 00 00 00 00 00 00"
-                    .ToByteArray());
-            /*short count = 0;
-            pWriter.WriteShort(count);
-            for (int i = 0; i < count; i++) {
-                pWriter.WriteInt();
-                pWriter.WriteInt();
-                pWriter.WriteInt();
-                pWriter.WriteInt();
-                pWriter.WriteInt();
-                pWriter.WriteInt();
-                pWriter.WriteShort();
-                pWriter.WriteInt();
-                pWriter.WriteByte();
-                pWriter.WriteLong();
-            }*/
         }
 
         public static Packet AddItem(IFieldObject<Item> item, int userObjectId)

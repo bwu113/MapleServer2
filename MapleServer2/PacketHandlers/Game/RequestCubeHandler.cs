@@ -1,10 +1,10 @@
-using System;
+﻿using System;
+using Maple2Storage.Types.Metadata;
 using MaplePacketLib2.Tools;
 using MapleServer2.Constants;
+using MapleServer2.Data.Static;
 using MapleServer2.Packets;
 using MapleServer2.Servers.Game;
-using MapleServer2.Data.Static;
-using Maple2Storage.Types.Metadata;
 using Microsoft.Extensions.Logging;
 
 namespace MapleServer2.PacketHandlers.Game
@@ -48,7 +48,7 @@ namespace MapleServer2.PacketHandlers.Game
             // Find matching mapObject
             foreach (MapObject mapObject in MapEntityStorage.GetObjects(session.Player.MapId))
             {
-                if (mapObject.Coord.Equals(sCoords[0], sCoords[1], sCoords[2]))
+                if (mapObject.Coord.Equals(sCoords))
                 {
                     weaponId = mapObject.WeaponId;
                     break;
