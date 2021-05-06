@@ -1,9 +1,12 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Globalization;
+using System.IO;
 using System.Linq;
 using Autofac;
 using MaplePacketLib2.Tools;
+using MapleServer2.Constants;
+using MapleServer2.Database;
 using MapleServer2.Network;
 using MapleServer2.Servers.Game;
 using MapleServer2.Servers.Login;
@@ -14,12 +17,23 @@ namespace MapleServer2
 {
     public static class MapleServer
     {
-
         private static GameServer gameServer;
+
         public static void Main(string[] args)
         {
             // Force Globalization to en-US because we use periods instead of commas for decimals
             CultureInfo.CurrentCulture = new CultureInfo("en-US");
+
+            // Load .env file
+            string dotenv = Path.Combine(Paths.SOLUTION_DIR, ".env");
+
+            if (!File.Exists(dotenv))
+            {
+                throw new ArgumentException(".env file not found!");
+            }
+            DotEnv.Load(dotenv);
+
+            InitDatabase();
 
             // No DI here because MapleServer is static
             Logger logger = LogManager.GetCurrentClassLogger();
@@ -68,6 +82,20 @@ namespace MapleServer2
                         logger.Info($"Unknown command:{input[0]} args:{(input.Length > 1 ? input[1] : "N/A")}");
                         break;
                 }
+            }
+        }
+
+        private static void InitDatabase()
+        {
+            using (DatabaseContext context = new DatabaseContext())
+            {
+                // Creates the database if not exists
+                if (context.Database.EnsureCreated())
+                {
+                    Console.WriteLine("Creating database.");
+                    return;
+                }
+                Console.WriteLine("Database already exists.");
             }
         }
 

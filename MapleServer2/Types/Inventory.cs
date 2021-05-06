@@ -10,27 +10,50 @@ namespace MapleServer2.Types
 {
     public class Inventory
     {
-        public short Size { get; }
-        public IReadOnlyDictionary<long, Item> Items => items;
-        // This contains ALL inventory items regardless of tab
-        private readonly Dictionary<long, Item> items;
+        public readonly long Id;
+        // This contains ALL inventory Items regardless of tab
+        public readonly Dictionary<long, Item> Items;
+        public Dictionary<ItemSlot, Item> Equips;
+        public Dictionary<ItemSlot, Item> Cosmetics;
+        public List<Item> Badges;
+
+        public List<Item> DB_Items { get; set; }
 
         // Map of Slot to Uid for each inventory
-        private readonly Dictionary<short, long>[] slotMaps;
+        private readonly Dictionary<short, long>[] SlotMaps;
 
-        public Inventory(short size)
+        public readonly Dictionary<InventoryTab, short> DefaultSize = new Dictionary<InventoryTab, short> {
+            { InventoryTab.Gear, 48}, { InventoryTab.Outfit, 150}, { InventoryTab.Mount, 48}, { InventoryTab.Catalyst, 48},
+            { InventoryTab.FishingMusic, 48}, { InventoryTab.Quest, 48}, { InventoryTab.Gemstone, 48}, { InventoryTab.Misc, 48},
+            { InventoryTab.LifeSkill, 126}, { InventoryTab.Pets, 60}, { InventoryTab.Consumable, 84}, { InventoryTab.Currency, 48},
+            { InventoryTab.Badge, 60}, { InventoryTab.Lapenshard, 48}, { InventoryTab.Fragment, 48}
+        };
+
+        public Dictionary<InventoryTab, short> ExtraSize = new Dictionary<InventoryTab, short> {
+            { InventoryTab.Gear, 0}, { InventoryTab.Outfit, 0}, { InventoryTab.Mount, 0}, { InventoryTab.Catalyst, 0},
+            { InventoryTab.FishingMusic, 0}, { InventoryTab.Quest, 0}, { InventoryTab.Gemstone, 0}, { InventoryTab.Misc, 0},
+            { InventoryTab.LifeSkill, 0}, { InventoryTab.Pets, 0}, { InventoryTab.Consumable, 0}, { InventoryTab.Currency, 0},
+            { InventoryTab.Badge, 0}, { InventoryTab.Lapenshard, 0}, { InventoryTab.Fragment, 0}
+        };
+
+        // Only use to share information between handler functions. Should always be empty
+        public Dictionary<long, Item> TemporaryStorage = new Dictionary<long, Item>();
+
+        public Inventory()
         {
-            this.Size = size;
-            this.items = new Dictionary<long, Item>();
+            Equips = new Dictionary<ItemSlot, Item>();
+            Cosmetics = new Dictionary<ItemSlot, Item>();
+            Badges = new List<Item>();
+            Items = new Dictionary<long, Item>();
             byte maxTabs = Enum.GetValues(typeof(InventoryTab)).Cast<byte>().Max();
-            this.slotMaps = new Dictionary<short, long>[maxTabs + 1];
+            SlotMaps = new Dictionary<short, long>[maxTabs + 1];
             for (byte i = 0; i <= maxTabs; i++)
             {
-                this.slotMaps[i] = new Dictionary<short, long>();
+                SlotMaps[i] = new Dictionary<short, long>();
             }
         }
 
-        public Inventory(short size, IEnumerable<Item> loadItems) : this(size)
+        public Inventory(IEnumerable<Item> loadItems) : this()
         {
             foreach (Item item in loadItems)
             {
@@ -38,9 +61,37 @@ namespace MapleServer2.Types
             }
         }
 
+        public Inventory(Inventory inventory) : this()
+        {
+            Id = inventory.Id;
+            ExtraSize = inventory.ExtraSize;
+            foreach (Item item in inventory.DB_Items)
+            {
+                if (item.IsEquipped)
+                {
+                    if (item.InventoryTab == InventoryTab.Outfit)
+                    {
+                        Cosmetics.Add(item.ItemSlot, item);
+                    }
+                    else if (item.InventoryTab == InventoryTab.Badge)
+                    {
+                        Badges.Add(item);
+                    }
+                    else
+                    {
+                        Equips.Add(item.ItemSlot, item);
+                    }
+                }
+                else
+                {
+                    Add(item);
+                }
+            }
+        }
+
         public ICollection<Item> GetItems(InventoryTab tab)
         {
-            return GetSlots(tab).Select(kvp => items[kvp.Value])
+            return GetSlots(tab).Select(kvp => Items[kvp.Value])
                 .ToImmutableList();
         }
 
@@ -61,7 +112,8 @@ namespace MapleServer2.Types
                 item.Slot = -1; // Reset slot
             }
 
-            for (short i = 0; i < Size; i++)
+            short tabSize = (short) (DefaultSize[item.InventoryTab] + ExtraSize[item.InventoryTab]);
+            for (short i = 0; i < tabSize; i++)
             {
                 if (SlotTaken(item, i))
                 {
@@ -79,7 +131,7 @@ namespace MapleServer2.Types
         public int Remove(long uid, out Item removedItem, int amount = -1)
         {
             // Removing more than available
-            if (!items.TryGetValue(uid, out Item item) || item.Amount < amount)
+            if (!Items.TryGetValue(uid, out Item item) || item.Amount < amount)
             {
                 removedItem = null;
                 return -1;
@@ -101,7 +153,7 @@ namespace MapleServer2.Types
         // Replaces an existing item with an updated copy of itself
         public bool Replace(Item item)
         {
-            if (!items.ContainsKey(item.Uid))
+            if (!Items.ContainsKey(item.Uid))
             {
                 return false;
             }
@@ -157,9 +209,9 @@ namespace MapleServer2.Types
         // This REQUIRES item.Slot to be set appropriately
         private void AddInternal(Item item)
         {
-            Debug.Assert(!items.ContainsKey(item.Uid),
+            Debug.Assert(!Items.ContainsKey(item.Uid),
                 "Error adding an item that already exists");
-            items[item.Uid] = item;
+            Items[item.Uid] = item;
 
             Debug.Assert(!GetSlots(item.InventoryTab).ContainsKey(item.Slot),
                 "Error adding item to slot that is already taken.");
@@ -168,7 +220,7 @@ namespace MapleServer2.Types
 
         private bool RemoveInternal(long uid, out Item item)
         {
-            return items.Remove(uid, out item)
+            return Items.Remove(uid, out item)
                    && GetSlots(item.InventoryTab).Remove(item.Slot);
         }
 
@@ -185,13 +237,12 @@ namespace MapleServer2.Types
 
         public bool SlotTaken(Item item, short slot = -1)
         {
-            Debug.WriteLine(item.InventoryTab);
             return GetSlots(item.InventoryTab).ContainsKey(slot < 0 ? item.Slot : slot);
         }
 
         private Dictionary<short, long> GetSlots(InventoryTab tab)
         {
-            return slotMaps[(int) tab];
+            return SlotMaps[(int) tab];
         }
     }
 }

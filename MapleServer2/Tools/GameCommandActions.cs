@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Linq;
 using Maple2Storage.Types;
 using Maple2Storage.Types.Metadata;
 using MapleServer2.Data.Static;
@@ -17,6 +18,15 @@ namespace MapleServer2.Tools
             string[] args = command.ToLower().Split(" ", 2);
             switch (args[0])
             {
+                case "completequest":
+                    ProcessQuestCommand(session, args.Length > 1 ? args[1] : "");
+                    break;
+                case "status":
+                    ProcessStatusCommand(session, args.Length > 1 ? args[1] : "");
+                    break;
+                case "sethandicraft":
+                    session.Player.Levels.GainMasteryExp(MasteryType.Handicraft, ParseInt(session, args.Length > 1 ? args[1] : ""));
+                    break;
                 case "setprestigelevel":
                     session.Player.Levels.SetPrestigeLevel(ParseInt(session, args.Length > 1 ? args[1] : ""));
                     break;
@@ -60,7 +70,7 @@ namespace MapleServer2.Tools
                     ProcessMapCommand(session, args.Length > 1 ? args[1] : "");
                     break;
                 case "coord":
-                    session.SendNotice(session.FieldPlayer.Coord.ToString());
+                    ProcessCoordCommand(session, args.Length > 1 ? args[1] : "");
                     break;
                 case "battleoff":
                     session.Send(UserBattlePacket.UserBattle(session.FieldPlayer, false));
@@ -75,49 +85,108 @@ namespace MapleServer2.Tools
             }
         }
 
+        private static void ProcessQuestCommand(GameSession session, string command)
+        {
+            if (command == "")
+            {
+                session.SendNotice("Type a quest id.");
+                return;
+            }
+            if (!int.TryParse(command, out int questId))
+            {
+                return;
+            }
+            QuestStatus questStatus = session.Player.QuestList.FirstOrDefault(x => x.Basic.Id == questId);
+            if (questStatus == null)
+            {
+                return;
+            }
+
+            questStatus.Completed = true;
+            questStatus.CompleteTimestamp = DateTimeOffset.Now.ToUnixTimeSeconds();
+
+            session.Player.Levels.GainExp(questStatus.Reward.Exp);
+            session.Player.Wallet.Meso.Modify(questStatus.Reward.Money);
+
+            foreach (QuestRewardItem reward in questStatus.RewardItems)
+            {
+                Item newItem = new Item(reward.Code)
+                {
+                    Amount = reward.Count,
+                    Rarity = reward.Rank
+                };
+                if (newItem.RecommendJobs.Contains(session.Player.Job) || newItem.RecommendJobs.Contains(0))
+                {
+                    InventoryController.Add(session, newItem, true);
+                }
+            }
+
+            session.Send(QuestPacket.CompleteQuest(questId, true));
+
+            // Add next quest
+            IEnumerable<KeyValuePair<int, QuestMetadata>> questList = QuestMetadataStorage.GetAllQuests().Where(x => x.Value.Require.RequiredQuests.Contains(questId));
+            foreach (KeyValuePair<int, QuestMetadata> kvp in questList)
+            {
+                session.Player.QuestList.Add(new QuestStatus(kvp.Value));
+            }
+        }
+
+        private static void ProcessCoordCommand(GameSession session, string command)
+        {
+            if (command == "")
+            {
+                session.SendNotice(session.FieldPlayer.Coord.ToString());
+            }
+            else
+            {
+                string[] coords = command.Replace(" ", "").Split(",");
+                if (!float.TryParse(coords[0], out float x))
+                {
+                    return;
+                }
+                if (!float.TryParse(coords[1], out float y))
+                {
+                    return;
+                }
+                if (!float.TryParse(coords[2], out float z))
+                {
+                    return;
+                }
+
+                session.Player.Coord = CoordF.From(x, y, z);
+                session.Send(FieldPacket.RequestEnter(session.FieldPlayer));
+            }
+        }
+
         // Example: "item id:20000027"
         private static void ProcessItemCommand(GameSession session, string command)
         {
             Dictionary<string, string> config = command.ToMap();
-            int.TryParse(config.GetValueOrDefault("id", "20000027"), out int itemId);
+            if (!int.TryParse(config.GetValueOrDefault("id", "20000027"), out int itemId))
+            {
+                return;
+            }
             if (!ItemMetadataStorage.IsValid(itemId))
             {
                 session.SendNotice("Invalid item: " + itemId);
                 return;
             }
 
-            // Add some bonus attributes to equips and pets
-            ItemStats stats = new ItemStats();
-            if (ItemMetadataStorage.GetTab(itemId) == InventoryTab.Gear
-                    || ItemMetadataStorage.GetTab(itemId) == InventoryTab.Pets)
-            {
-                Random rng = new Random();
-                stats.BonusAttributes.Add(ItemStat.Of((ItemAttribute) rng.Next(35), 0.01f));
-                stats.BonusAttributes.Add(ItemStat.Of((ItemAttribute) rng.Next(35), 0.01f));
-            }
+            _ = int.TryParse(config.GetValueOrDefault("rarity", "5"), out int rarity);
+            _ = int.TryParse(config.GetValueOrDefault("amount", "1"), out int amount);
 
             Item item = new Item(itemId)
             {
                 CreationTime = DateTimeOffset.UtcNow.ToUnixTimeSeconds(),
                 TransferFlag = TransferFlag.Splitable | TransferFlag.Tradeable,
-                Stats = stats,
-                PlayCount = itemId.ToString().StartsWith("35") ? 10 : 0
+                PlayCount = itemId.ToString().StartsWith("35") ? 10 : 0,
+                Rarity = rarity,
+                Amount = amount
             };
-            int rarity = 0;
-            int.TryParse(config.GetValueOrDefault("rarity", "5"), out rarity);
-            if (rarity > 0)
-            {
-                item.Rarity = rarity;
-            }
-            int.TryParse(config.GetValueOrDefault("amount", "1"), out item.Amount);
+            item.Stats = new ItemStats(item);
 
             // Simulate looting item
             InventoryController.Add(session, item, true);
-            /*if (session.Player.Inventory.Add(item))
-            {
-                session.Send(ItemInventoryPacket.Add(item));
-                session.Send(ItemInventoryPacket.MarkItemNew(item, item.Amount));
-            }*/
         }
 
         // Example: "map -> return current map id"
@@ -125,7 +194,10 @@ namespace MapleServer2.Tools
         private static void ProcessMapCommand(GameSession session, string command)
         {
             Dictionary<string, string> config = command.ToMap();
-            int.TryParse(config.GetValueOrDefault("id", "0"), out int mapId);
+            if (!int.TryParse(config.GetValueOrDefault("id", "0"), out int mapId))
+            {
+                return;
+            }
             if (mapId == 0)
             {
                 session.SendNotice($"Current map id:{session.Player.MapId}");
@@ -156,10 +228,19 @@ namespace MapleServer2.Tools
         private static void ProcessNpcCommand(GameSession session, string command)
         {
             Dictionary<string, string> config = command.ToMap();
-            int.TryParse(config.GetValueOrDefault("id", "11003146"), out int npcId);
+            if (!int.TryParse(config.GetValueOrDefault("id", "11003146"), out int npcId))
+            {
+                return;
+            }
             Npc npc = new Npc(npcId);
-            byte.TryParse(config.GetValueOrDefault("ani", "-1"), out npc.Animation);
-            short.TryParse(config.GetValueOrDefault("dir", "2700"), out npc.Rotation);
+            if (byte.TryParse(config.GetValueOrDefault("ani", "-1"), out byte animation))
+            {
+                npc.Animation = animation;
+            }
+            if (short.TryParse(config.GetValueOrDefault("dir", "2700"), out short rotation))
+            {
+                npc.ZRotation = rotation;
+            }
 
             IFieldObject<Npc> fieldNpc = session.FieldManager.RequestFieldObject(npc);
             if (TryParseCoord(config.GetValueOrDefault("coord", ""), out CoordF coord))
@@ -177,10 +258,19 @@ namespace MapleServer2.Tools
         private static void ProcessMobCommand(GameSession session, string command)
         {
             Dictionary<string, string> config = command.ToMap();
-            int.TryParse(config.GetValueOrDefault("id", "11003146"), out int mobId);
+            if (!int.TryParse(config.GetValueOrDefault("id", "21000001"), out int mobId))
+            {
+                return;
+            }
             Mob mob = new Mob(mobId);
-            byte.TryParse(config.GetValueOrDefault("ani", "-1"), out mob.Animation);
-            short.TryParse(config.GetValueOrDefault("dir", "2700"), out mob.Rotation);
+            if (byte.TryParse(config.GetValueOrDefault("ani", "-1"), out byte animation))
+            {
+                mob.Animation = animation;
+            }
+            if (short.TryParse(config.GetValueOrDefault("dir", "2700"), out short rotation))
+            {
+                mob.ZRotation = rotation;
+            }
 
             IFieldObject<Mob> fieldMob = session.FieldManager.RequestFieldObject(mob);
             if (TryParseCoord(config.GetValueOrDefault("coord", ""), out CoordF coord))
@@ -193,6 +283,18 @@ namespace MapleServer2.Tools
             }
 
             session.FieldManager.AddMob(fieldMob);
+        }
+
+        // Example: "status id:10400081"
+        private static void ProcessStatusCommand(GameSession session, string command)
+        {
+            Dictionary<string, string> config = command.ToMap();
+            if (!int.TryParse(config.GetValueOrDefault("id", "10400081"), out int statusId))
+            {
+                return;
+            }
+            Status status = new Status(statusId, session.FieldPlayer.ObjectId, session.FieldPlayer.ObjectId, 1, 1, 1);
+            session.Send(BuffPacket.SendBuff(0, status));
         }
 
         private static Dictionary<string, string> ToMap(this string command)

@@ -4,6 +4,7 @@ using Maple2Storage.Types.Metadata;
 using MapleServer2.Data.Static;
 using MapleServer2.Enums;
 using MapleServer2.Servers.Game;
+using MapleServer2.Tools;
 using MapleServer2.Types;
 
 namespace MapleServer2.PacketHandlers.Game.Helpers
@@ -126,6 +127,7 @@ namespace MapleServer2.PacketHandlers.Game.Helpers
                     Rarity = content.Rarity,
                     Enchants = content.EnchantLevel,
                 };
+                item.Stats = new ItemStats(item);
                 InventoryController.Add(session, item, true);
 
                 if (content.Id2 != 0)
@@ -133,8 +135,9 @@ namespace MapleServer2.PacketHandlers.Game.Helpers
                     item = new Item(content.Id2)
                     {
                         Amount = rng.Next(content.MinAmount, content.MaxAmount),
-                        Rarity = content.Rarity
+                        Rarity = content.Rarity,
                     };
+                    item.Stats = new ItemStats(item);
                     InventoryController.Add(session, item, true);
                 }
             }

@@ -6,11 +6,13 @@ using MaplePacketLib2.Tools;
 using MapleServer2.Constants;
 using MapleServer2.Data;
 using MapleServer2.Data.Static;
+using MapleServer2.Database;
 using MapleServer2.Extensions;
 using MapleServer2.Network;
 using MapleServer2.Packets;
 using MapleServer2.Servers.Game;
 using MapleServer2.Servers.Login;
+using MapleServer2.Tools;
 using MapleServer2.Types;
 using Microsoft.Extensions.Logging;
 
@@ -31,22 +33,23 @@ namespace MapleServer2.PacketHandlers.Common
             packet.Skip(-8);
             HandleCommon(session, packet);
 
-            Player player = AccountStorage.GetCharacter(authData.CharacterId);
+            Player player = DatabaseManager.GetCharacter(authData.CharacterId);
+            if (player == default)
+            {
+                throw new ArgumentException("Character not found!");
+            }
+
             player.Session = session;
 
             session.InitPlayer(player);
 
             //session.Send(0x27, 0x01); // Meret market related...?
+            session.Send(BuddyPacket.Initialize());
 
-            session.Send(PacketWriter.Of(SendOp.LOGIN_REQUIRED)
-                .WriteByte(0x17)
-                .Write(accountId)
-                .WriteInt().WriteByte().WriteLong()
-                .WriteInt(1).WriteInt().WriteInt().WriteLong()
-            );
+            session.Send(LoginPacket.LoginRequired(accountId));
 
-            session.Send(BuddyListPacket.StartList());
-            session.Send(BuddyListPacket.EndList());
+            session.Send(BuddyPacket.LoadList(player));
+            session.Send(BuddyPacket.EndList(player.BuddyList.Count));
 
             // Meret market
             //session.Send("6E 00 0B 00 00 00 00 00 00 00 00 00 00 00 00".ToByteArray());
@@ -58,15 +61,17 @@ namespace MapleServer2.PacketHandlers.Common
             TimeSyncPacket.SetInitial1();
             TimeSyncPacket.SetInitial2();
             TimeSyncPacket.Request();
-            // SendStat 0x2F (How to send here without ObjectId?, Seems fine to send after entering field)
+            session.Send(StatPacket.SetStats(session.FieldPlayer));
+            // TODO: Grab Hp/Spirit/Stam from last login
+            player.Stats.InitializePools(player.Stats[PlayerStatId.Hp].Max, player.Stats[PlayerStatId.Spirit].Max, player.Stats[PlayerStatId.Stamina].Max);
 
             session.SyncTicks();
-            session.Send(PacketWriter.Of(SendOp.DYNAMIC_CHANNEL).WriteByte(0x00)
-                .WriteShort(10).WriteShort(9).WriteShort(9).WriteShort(9)
-                .WriteShort(9).WriteShort(10).WriteShort(10).WriteShort(10));
+            session.Send(DynamicChannelPacket.DynamicChannel());
             session.Send(ServerEnterPacket.Enter(session));
             // SendUgc f(0x16), SendCash f(0x09), SendContentShutdown f(0x01, 0x04), SendPvp f(0x0C)
-            session.Send(PacketWriter.Of(SendOp.SYNC_NUMBER).WriteByte());
+            PacketWriter pWriter = PacketWriter.Of(SendOp.SYNC_NUMBER);
+            pWriter.WriteByte();
+            session.Send(pWriter);
             // 0x112, Prestige f(0x00, 0x07)
             session.Send(PrestigePacket.Prestige(session.Player));
 
@@ -77,15 +82,32 @@ namespace MapleServer2.PacketHandlers.Common
             }
 
             List<QuestMetadata> questList = QuestMetadataStorage.GetAvailableQuests(player.Levels.Level); // TODO: This logic needs to be refactored when DB is implemented
-            IEnumerable<List<QuestMetadata>> packetCount = SplitList(questList, 200); // Split the quest list in 200 quests per packet, same way kms do
+            questList.Add(QuestMetadataStorage.GetMetadata(60100000)); // Manually adding "the caravan" for testing purposes
 
-            foreach (List<QuestMetadata> item in packetCount)
+            foreach (QuestMetadata quest in questList)
+            {
+                session.Player.QuestList.Add(new QuestStatus(quest));
+            }
+
+            IEnumerable<List<QuestStatus>> packetCount = SplitList(session.Player.QuestList, 200); // Split the quest list in 200 quests per packet, same way kms do
+
+            foreach (List<QuestStatus> item in packetCount)
             {
                 session.Send(QuestPacket.SendQuests(item));
             }
-            session.Send(MarketInventoryPacket.Count(0)); // Typically sent after buddylist
-            session.Send(MarketInventoryPacket.StartList());
-            session.Send(MarketInventoryPacket.EndList());
+
+            session.Send(TrophyPacket.WriteTableStart());
+            List<Trophy> trophyList = new List<Trophy>(session.Player.TrophyData.Values);
+            IEnumerable<List<Trophy>> trophyListPackets = SplitList(trophyList, 60);
+
+            foreach (List<Trophy> trophy in trophyListPackets)
+            {
+                session.Send(TrophyPacket.WriteTableContent(trophy));
+            }
+
+            session.Send(WarehouseInventoryPacket.Count()); // Typically sent after buddylist
+            session.Send(WarehouseInventoryPacket.StartList());
+            session.Send(WarehouseInventoryPacket.EndList());
             session.Send(FurnishingInventoryPacket.StartList());
             session.Send(FurnishingInventoryPacket.EndList());
             // SendQuest, SendAchieve, SendManufacturer, SendUserMaid
@@ -98,7 +120,7 @@ namespace MapleServer2.PacketHandlers.Common
             session.Send(UserEnvPacket.Send12());
 
             // SendMeretMarket f(0xC9)
-            session.Send(FishingPacket.LoadLog());
+            session.Send(FishingPacket.LoadAlbum(player));
             // SendPvp f(0x16,0x17), ResponsePet f(0x07), 0xF6
             // CharacterAbility
             // E1 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
@@ -147,7 +169,7 @@ namespace MapleServer2.PacketHandlers.Common
             int tokenA = packet.ReadInt();
             int tokenB = packet.ReadInt();
 
-            logger.Info($"LOGIN USER: {accountId}");
+            Logger.Info($"LOGIN USER: {accountId}");
             AuthData authData = AuthStorage.GetData(accountId);
             if (authData == null)
             {

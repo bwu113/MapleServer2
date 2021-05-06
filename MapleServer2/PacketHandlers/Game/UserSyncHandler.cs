@@ -1,6 +1,8 @@
-﻿using Maple2Storage.Types;
+﻿using System;
+using Maple2Storage.Types;
 using MaplePacketLib2.Tools;
 using MapleServer2.Constants;
+using MapleServer2.Data.Static;
 using MapleServer2.Packets;
 using MapleServer2.Packets.Helpers;
 using MapleServer2.Servers.Game;
@@ -19,7 +21,6 @@ namespace MapleServer2.PacketHandlers.Game
 
         public override void Handle(GameSession session, PacketReader packet)
         {
-
             byte function = packet.ReadByte(); // Unknown what this is for
             session.ClientTick = packet.ReadInt(); //ClientTicks
             packet.ReadInt(); // ServerTicks
@@ -41,26 +42,32 @@ namespace MapleServer2.PacketHandlers.Game
 
             Packet syncPacket = SyncStatePacket.UserSync(session.FieldPlayer, syncStates);
             session.FieldManager.BroadcastPacket(syncPacket, session);
-            if (IsCoordSafe(session, syncStates[0].Coord.ToFloat()))
+
+            CoordF coord = syncStates[0].Coord.ToFloat();
+            CoordF closestBlock = Block.ClosestBlock(coord);
+            closestBlock.Z -= Block.BLOCK_SIZE; // Get block under player
+
+            if (IsCoordSafe(session, syncStates[0].Coord, closestBlock))
             {
-                session.Player.SafeCoord = session.FieldPlayer.Coord.ClosestBlock();
+                session.Player.SafeBlock = closestBlock;
             }
 
             session.FieldPlayer.Coord = syncStates[0].Coord.ToFloat();
+            CoordF rotation = new CoordF();
+            rotation.Z = syncStates[0].Rotation / 10;
+            session.FieldPlayer.Rotation = rotation;
+
             if (IsOutOfBounds(session.FieldPlayer.Coord, session.FieldManager.BoundingBox))
             {
-                session.Player.SafeCoord.Z += 10; // Without this player will spawn inside the block
-                // for some reason if coord is negative player is teleported one block over, which can result player being stuck inside a block
-                if (session.FieldPlayer.Coord.Y < 0)
-                {
-                    session.Player.SafeCoord.Y -= 150;
-                }
-                if (session.FieldPlayer.Coord.X < 0)
-                {
-                    session.Player.SafeCoord.X -= 150;
-                }
-                session.Send(UserMoveByPortalPacket.Move(session, session.Player.SafeCoord));
-                session.Send(FallDamagePacket.FallDamage(session, 150)); // TODO: create a formula to determine HP loss
+                int currentHp = session.Player.Stats[PlayerStatId.Hp].Current;
+                int fallDamage = currentHp * Math.Clamp(currentHp * 4 / 100 - 1, 0, 25) / 100; // TODO: Create accurate damage model
+                CoordF safeBlock = session.Player.SafeBlock;
+                safeBlock.Z += Block.BLOCK_SIZE + 1; // Without this player will spawn inside the block
+                session.Player.ConsumeHp(fallDamage);
+
+                session.Send(UserMoveByPortalPacket.Move(session, safeBlock, session.Player.Rotation));
+                session.Send(StatPacket.UpdateStats(session.FieldPlayer, PlayerStatId.Hp));
+                session.Send(FallDamagePacket.FallDamage(session, fallDamage));
             }
             // not sure if this needs to be synced here
             session.Player.Animation = syncStates[0].Animation1;
@@ -68,18 +75,36 @@ namespace MapleServer2.PacketHandlers.Game
 
         private static bool IsOutOfBounds(CoordF coord, CoordS[] boundingBox)
         {
-            CoordS higherBoundingBox = boundingBox[0].Z > boundingBox[1].Z ? boundingBox[0] : boundingBox[1];
-            CoordS lowerBoundingBox = boundingBox[0].Z > boundingBox[1].Z ? boundingBox[1] : boundingBox[0];
-            if (coord.Z > higherBoundingBox.Z || coord.Z < lowerBoundingBox.Z)
+            short higherBoundZ = Math.Max(boundingBox[0].Z, boundingBox[1].Z);
+            short lowerBoundZ = Math.Min(boundingBox[1].Z, boundingBox[0].Z);
+            short higherBoundY = Math.Max(boundingBox[0].Y, boundingBox[1].Y);
+            short lowerBoundY = Math.Min(boundingBox[1].Y, boundingBox[0].Y);
+            short higherBoundX = Math.Max(boundingBox[0].X, boundingBox[1].X);
+            short lowerBoundX = Math.Min(boundingBox[1].X, boundingBox[0].X);
+
+            if (coord.Z > higherBoundZ || coord.Z < lowerBoundZ)
             {
                 return true;
             }
+            else if (coord.Y > higherBoundY || coord.Y < lowerBoundY)
+            {
+                return true;
+            }
+            else if (coord.X > higherBoundX || coord.X < lowerBoundX)
+            {
+                return true;
+            }
+
             return false;
         }
 
-        private static bool IsCoordSafe(GameSession session, CoordF coord)
+        private static bool IsCoordSafe(GameSession session, CoordS currentCoord, CoordF closestCoord)
         {
-            return (session.Player.SafeCoord - coord).Length() > 200 && session.FieldPlayer.Coord.Z == coord.Z && !session.Player.OnAirMount; // Save last coord if player is not falling and not in a air mount
+            // Save last coord if player is not falling and not in a air mount
+            return MapMetadataStorage.BlockExists(session.Player.MapId, closestCoord.ToShort()) &&
+                !session.Player.OnAirMount &&
+                (session.Player.SafeBlock - closestCoord).Length() > 350 &&
+                session.FieldPlayer.Coord.Z == currentCoord.Z;
         }
     }
 }

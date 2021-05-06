@@ -1,50 +1,39 @@
-﻿using System;
-using System.Collections.Generic;
+﻿using System.Collections.Generic;
 using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
 using MapleServer2.Enums;
 
 namespace MapleServer2.Types
 {
     public class StatDistribution
     {
-        public int TotalStatPoints { get; private set; }
-        public Dictionary<OtherStatsIndex, int> OtherStats { get; private set; }
-
-        public Dictionary<byte, int> AllocatedStats { get; private set; }
+        public int TotalStatPoints { get; set; }
+        public Dictionary<OtherStatsIndex, int> OtherStats { get; set; }
+        public Dictionary<byte, int> AllocatedStats { get; set; }
         // key = index representing the stat type (ie. a value of 00 corresponds to Str)
         // value = number of points allocated to the stat
 
-        public StatDistribution(int totalStats = 0, Dictionary<byte, int> AllocatedStats = null, Dictionary<OtherStatsIndex, int> OtherStats = null)
+        public StatDistribution() { }
+
+        public StatDistribution(int totalStats = 0, Dictionary<byte, int> allocatedStats = null, Dictionary<OtherStatsIndex, int> otherStats = null)
         {
             // hardcode the amount of stat points the character starts with temporarily
-            this.TotalStatPoints = totalStats;
-            this.AllocatedStats = AllocatedStats ?? new Dictionary<byte, int>();
-            this.OtherStats = OtherStats ?? new Dictionary<OtherStatsIndex, int>();
-
-            AddTotalStatPoints(1, OtherStatsIndex.Quest);
-            AddTotalStatPoints(2, OtherStatsIndex.Trophy);
-            AddTotalStatPoints(3, OtherStatsIndex.Exploration);
-            AddTotalStatPoints(4, OtherStatsIndex.Prestige);
+            TotalStatPoints = totalStats;
+            AllocatedStats = allocatedStats ?? new Dictionary<byte, int>();
+            OtherStats = otherStats ?? new Dictionary<OtherStatsIndex, int>();
         }
 
-        public void AddTotalStatPoints(int amount)
+        public void AddTotalStatPoints(int amount, OtherStatsIndex pointSrc = 0)
         {
-            this.TotalStatPoints += amount;
-        }
-
-        public void AddTotalStatPoints(int amount, OtherStatsIndex pointSrc)
-        {
-            if (OtherStats.ContainsKey(pointSrc))
+            TotalStatPoints += amount;
+            if (pointSrc == 0)
             {
-                OtherStats[pointSrc] += amount;
+                return;
             }
-            else
+            if (!OtherStats.ContainsKey(pointSrc))
             {
-                OtherStats[pointSrc] = amount;
+                OtherStats[pointSrc] = 0;
             }
-            this.TotalStatPoints += amount;
+            OtherStats[pointSrc] += amount;
         }
 
         public void AddPoint(byte statType)

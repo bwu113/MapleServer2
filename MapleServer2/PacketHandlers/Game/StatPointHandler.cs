@@ -1,8 +1,8 @@
-﻿using System;
-using MaplePacketLib2.Tools;
+﻿using MaplePacketLib2.Tools;
 using MapleServer2.Constants;
 using MapleServer2.Packets;
 using MapleServer2.Servers.Game;
+using MapleServer2.Types;
 using Microsoft.Extensions.Logging;
 
 namespace MapleServer2.PacketHandlers.Game
@@ -37,17 +37,20 @@ namespace MapleServer2.PacketHandlers.Game
             }
         }
 
-        private void HandleStatIncrement(GameSession session, PacketReader packet)
+        private static void HandleStatIncrement(GameSession session, PacketReader packet)
         {
             byte statTypeIndex = packet.ReadByte();
-            session.Player.StatPointDistribution.AddPoint(statTypeIndex);
+            session.Player.StatPointDistribution.AddPoint(statTypeIndex);   // Deprecate?
+            session.Player.Stats.IncreaseMax((PlayerStatId) statTypeIndex, 1);
             session.Send(StatPointPacket.WriteStatPointDistribution(session.Player));
+            session.Send(StatPacket.SetStats(session.FieldPlayer));
         }
 
-        private void HandleResetStatDistribution(GameSession session)
+        private static void HandleResetStatDistribution(GameSession session)
         {
-            session.Player.StatPointDistribution.ResetPoints();
-            session.Send(StatPointPacket.WriteStatPointDistribution(session.Player));
+            session.Player.Stats.ResetAllocations(session.Player.StatPointDistribution);
+            session.Send(StatPointPacket.WriteStatPointDistribution(session.Player));   // Deprecate?
+            session.Send(StatPacket.SetStats(session.FieldPlayer));
         }
     }
 }

@@ -2,6 +2,7 @@
 using Maple2Storage.Types;
 using MaplePacketLib2.Tools;
 using MapleServer2.Constants;
+using MapleServer2.PacketHandlers.Game.Helpers;
 using MapleServer2.Packets;
 using MapleServer2.Servers.Game;
 using MapleServer2.Types;
@@ -42,10 +43,10 @@ namespace MapleServer2.PacketHandlers.Game
                     HandleDamage(session, packet);
                     break;
                 case SkillHandlerMode.Mode3:
-                    HandleMode3(session, packet);
+                    HandleMode3(packet);
                     break;
                 case SkillHandlerMode.Mode4:
-                    HandleMode4(session, packet);
+                    HandleMode4(packet);
                     break;
                 default:
                     IPacketHandler<GameSession>.LogUnknownMode(mode);
@@ -53,31 +54,43 @@ namespace MapleServer2.PacketHandlers.Game
             }
         }
 
-        private void HandleFirstSent(GameSession session, PacketReader packet)
+        private static void HandleFirstSent(GameSession session, PacketReader packet)
         {
-            long skillUid = packet.ReadLong();
-            int value = packet.ReadInt();
+            long skillSN = packet.ReadLong();
+            int unkValue = packet.ReadInt();
             int skillId = packet.ReadInt();
             short skillLevel = packet.ReadShort();
             packet.ReadByte();
             CoordF coords = packet.Read<CoordF>();
             packet.ReadShort();
-            session.Send(SkillUsePacket.SkillUse(session.FieldPlayer, value, skillUid, coords));
+
+            SkillCast skillCast = new SkillCast(skillId, skillLevel, skillSN, unkValue);
+            int spiritCost = skillCast.GetSpCost();
+            int staminaCost = skillCast.GetStaCost();
+            if (session.Player.Stats[PlayerStatId.Spirit].Current >= spiritCost && session.Player.Stats[PlayerStatId.Stamina].Current >= staminaCost)
+            {
+                session.Player.ConsumeSp(spiritCost);
+                session.Player.ConsumeStamina(staminaCost);
+                // TODO: Add SP recovery
+                session.FieldPlayer.Value.SkillCast = skillCast;
+                session.Send(SkillUsePacket.SkillUse(skillCast, coords));
+                session.Send(StatPacket.SetStats(session.FieldPlayer));
+            }
         }
 
-        private void HandleDamage(GameSession session, PacketReader packet)
+        private static void HandleDamage(GameSession session, PacketReader packet)
         {
             DamagingMode mode = (DamagingMode) packet.ReadByte();
             switch (mode)
             {
                 case DamagingMode.TypeOfDamage:
-                    HandleTypeOfDamage(session, packet);
+                    HandleTypeOfDamage(packet);
                     break;
                 case DamagingMode.AoeDamage:
                     HandleAoeDamage(session, packet);
                     break;
                 case DamagingMode.TypeOfDamage2:
-                    HandleTypeOfDamage2(session, packet);
+                    HandleTypeOfDamage2(packet);
                     break;
                 default:
                     IPacketHandler<GameSession>.LogUnknownMode(mode);
@@ -85,20 +98,20 @@ namespace MapleServer2.PacketHandlers.Game
             }
         }
 
-        private void HandleMode3(GameSession session, PacketReader packet)
+        private static void HandleMode3(PacketReader packet)
         {
             packet.ReadLong();
             packet.ReadInt();
         }
 
-        private void HandleMode4(GameSession session, PacketReader packet)
+        private static void HandleMode4(PacketReader packet)
         {
             packet.ReadLong();
         }
 
-        private void HandleTypeOfDamage(GameSession session, PacketReader packet)
+        private static void HandleTypeOfDamage(PacketReader packet)
         {
-            long skillUid = packet.ReadLong();
+            long skillSN = packet.ReadLong();
             packet.ReadByte();
             CoordF coords = packet.Read<CoordF>();
             CoordF coords2 = packet.Read<CoordF>();
@@ -116,11 +129,11 @@ namespace MapleServer2.PacketHandlers.Game
             }
         }
 
-        private void HandleAoeDamage(GameSession session, PacketReader packet)
+        private static void HandleAoeDamage(GameSession session, PacketReader packet)
         {
             List<IFieldObject<Mob>> mobs = new List<IFieldObject<Mob>>();
-            long skillUid = packet.ReadLong();
-            int someValue = packet.ReadInt();
+            long skillSN = packet.ReadLong();
+            int unkValue = packet.ReadInt();
             int playerObjectId = packet.ReadInt();
             CoordF coords = packet.Read<CoordF>();
             CoordF coords2 = packet.Read<CoordF>();
@@ -128,24 +141,43 @@ namespace MapleServer2.PacketHandlers.Game
             packet.ReadByte();
             byte count = packet.ReadByte();
             packet.ReadInt();
+
             for (int i = 0; i < count; i++)
             {
-                mobs.Add(session.FieldManager.State.Mobs.GetValueOrDefault(packet.ReadInt()));
+                int entity = packet.ReadInt();
+                mobs.Add(session.FieldManager.State.Mobs.GetValueOrDefault(entity));
                 packet.ReadByte();
-                session.Send(StatPacket.UpdateMobStats(mobs[i]));
-            }
+                if (mobs[i] != null)
+                {
+                    mobs[i].Value.UpdateStats(session.FieldPlayer.Value.SkillCast.GetDamage());
+                    session.Send(StatPacket.UpdateMobStats(mobs[i]));
 
-            session.Send(SkillDamagePacket.ApplyDamage(session.FieldPlayer, skillUid, someValue, coords, mobs));
+                    // TODO: There needs to be a more centralized way to give rewards from killing mobs...
+                    // TODO: Add trophy, exp, meso and item drops
+                    if (mobs[i].Value.IsDead)
+                    {
+                        QuestHelper.UpdateQuest(session, mobs[i].Value.Id.ToString(), "npc");
+                    }
+
+                    if (mobs[i].Value.Id == 29000128) // Temp fix for tutorial barrier
+                    {
+                        session.Send("4F 00 03 E8 03 00 00 00 00 00 00 00 00 00 00 00 00 80 3F".ToByteArray());
+                        session.Send("4F 00 03 D0 07 00 00 00 00 00 00 00 00 00 00 00 00 80 3F".ToByteArray());
+                        session.Send("4F 00 08 01 04 01 00 00".ToByteArray());
+                    }
+                }
+            }
+            session.Send(SkillDamagePacket.ApplyDamage(session.FieldPlayer, skillSN, unkValue, coords, mobs));
         }
 
-        private void HandleTypeOfDamage2(GameSession session, PacketReader packet)
+        private static void HandleTypeOfDamage2(PacketReader packet)
         {
-            long skillUid = packet.ReadLong();
-            packet.ReadByte();
-            packet.ReadInt();
-            packet.ReadInt();
-            packet.Read<CoordF>();
-            packet.Read<CoordF>();
+            long skillSN = packet.ReadLong();
+            byte mode = packet.ReadByte();
+            int unk1 = packet.ReadInt();
+            int unk2 = packet.ReadInt();
+            CoordF coord = packet.Read<CoordF>();
+            CoordF coord1 = packet.Read<CoordF>();
         }
     }
 }

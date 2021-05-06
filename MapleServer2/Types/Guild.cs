@@ -2,7 +2,6 @@
 using System.Collections.Generic;
 using System.Linq;
 using MaplePacketLib2.Tools;
-using MapleServer2.Packets;
 using MapleServer2.Servers.Game;
 using MapleServer2.Tools;
 
@@ -22,6 +21,8 @@ namespace MapleServer2.Types
         public int Exp { get; set; }
         public bool Searchable { get; set; }
         public int HouseMapId { get; set; }
+
+        public Guild() { }
 
         public Guild(string name, List<Player> gPlayers)
         {
