@@ -4,8 +4,8 @@ using MaplePacketLib2.Tools;
 using MapleServer2.Constants;
 using MapleServer2.Packets;
 using MapleServer2.Servers.Game;
-using MapleServer2.Types;
 using MapleServer2.Tools;
+using MapleServer2.Types;
 using Microsoft.Extensions.Logging;
 
 namespace MapleServer2.PacketHandlers.Game
@@ -26,8 +26,13 @@ namespace MapleServer2.PacketHandlers.Game
             session.EnterField(session.Player.MapId);
             session.Send(StatPacket.SetStats(session.FieldPlayer));
             session.Send(StatPointPacket.WriteTotalStatPoints(session.Player));
+            foreach (MasteryExp mastery in session.Player.Levels.MasteryExp)
+            {
+                session.Send(MasteryPacket.SetExp(mastery.Type, mastery.CurrentExp));
+            }
             session.Send(EmotePacket.LoadEmotes(session.Player));
             session.Send(ChatStickerPacket.LoadChatSticker(session.Player));
+            session.Send(ResponseCubePacket.LoadHome(session.FieldPlayer));
 
             // Normally skill layout would be loaded from a database
             QuickSlot arrowStream = QuickSlot.From(10500001);
@@ -56,14 +61,9 @@ namespace MapleServer2.PacketHandlers.Game
             {
                 Amount = 90000
             };
-            Item item3 = new Item(20302228)
-            {
-                Amount = 1
-            };
 
             InventoryController.Add(session, item, true);
             InventoryController.Add(session, item2, true);
-            InventoryController.Add(session, item3, true);
 
             //Add mail for testing
             //System mail without any item
@@ -117,6 +117,7 @@ namespace MapleServer2.PacketHandlers.Game
             session.Player.Mailbox.AddOrUpdate(sysItemMail);
             session.Player.Mailbox.AddOrUpdate(sysMail);
             session.Player.Mailbox.AddOrUpdate(regMail);
+            session.Send(GameEventPacket.Load());
         }
     }
 }

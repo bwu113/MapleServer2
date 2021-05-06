@@ -40,7 +40,10 @@ namespace MapleServer2.Tools
                     }
                 }
 
-                session.Player.Inventory.Add(item); // Adds item into internal database
+                if (!session.Player.Inventory.Add(item)) // Adds item into internal database
+                {
+                    return;
+                }
                 session.Send(ItemInventoryPacket.Add(item)); // Sends packet to add item clientside
                 if (isNew)
                 {
@@ -54,11 +57,13 @@ namespace MapleServer2.Tools
                     Item newItem = new Item(item)
                     {
                         Amount = 1,
-                        Slot = session.Player.Inventory.SlotTaken(item, item.Slot) ? -1 : item.Slot,
+                        Slot = (short) (session.Player.Inventory.SlotTaken(item, item.Slot) ? -1 : item.Slot),
                         Uid = GuidGenerator.Long()
                     };
-
-                    session.Player.Inventory.Add(newItem);
+                    if (!session.Player.Inventory.Add(newItem))
+                    {
+                        continue;
+                    }
                     session.Send(ItemInventoryPacket.Add(newItem));
                     if (isNew)
                     {
@@ -66,6 +71,25 @@ namespace MapleServer2.Tools
                     }
                 }
             }
+        }
+
+        // Removes item based on quantity
+        public static void Consume(GameSession session, long uid, int amount)
+        {
+            Item item = session.Player.Inventory.Items[uid];
+            if (amount > item.Amount)
+            {
+                return;
+            }
+            if (amount == item.Amount)
+            {
+                Remove(session, uid, out Item _);
+                return;
+            }
+
+            item.Amount -= amount;
+            session.Send(ItemInventoryPacket.Update(uid, item.Amount));
+            return;
         }
 
         // Removes Item from inventory by reference
@@ -85,7 +109,10 @@ namespace MapleServer2.Tools
         // Picks up item
         public static void PickUp(GameSession session, Item item)
         {
-            session.Player.Inventory.Add(item); // Adds item into internal database
+            if (!session.Player.Inventory.Add(item)) // Adds item into internal database
+            {
+                return;
+            }
             session.Send(ItemInventoryPacket.Add(item)); // Sends packet to add item clientside
         }
 
@@ -134,7 +161,7 @@ namespace MapleServer2.Tools
         public static void LoadInventoryTab(GameSession session, InventoryTab tab)
         {
             session.Send(ItemInventoryPacket.ResetTab(tab));
-            session.Send(ItemInventoryPacket.LoadTab(tab));
+            session.Send(ItemInventoryPacket.LoadTab(tab, session.Player.Inventory.ExtraSize[tab]));
         }
 
         // Moves Item to destination slot
@@ -155,19 +182,19 @@ namespace MapleServer2.Tools
 
         }
 
-        // Updates item information
-        public static void Update(GameSession session, long uid, int amount)
+        public static void ExpandInventory(GameSession session, InventoryTab tab)
         {
-            Item item = session.Player.Inventory.Items[uid];
-            if ((item.Amount + amount) >= item.StackLimit)
+            Inventory inventory = session.Player.Inventory;
+            Wallet wallet = session.Player.Wallet;
+            long meretPrice = 390;
+            short expansionAmount = 6;
+
+            if (wallet.RemoveMerets(meretPrice))
             {
-                item.Amount = item.StackLimit;
+                inventory.ExtraSize[tab] += expansionAmount;
+                session.Send(ItemInventoryPacket.LoadTab(tab, inventory.ExtraSize[tab]));
+                session.Send(ItemInventoryPacket.Expand());
             }
-            else
-            {
-                item.Amount = amount;
-            }
-            session.Send(ItemInventoryPacket.Update(uid, amount));
         }
     }
 }

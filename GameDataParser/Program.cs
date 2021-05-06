@@ -31,7 +31,10 @@ namespace GameDataParser
             IEnumerable<MetadataExporter> exporters = new List<MetadataExporter>()
             {
                 new ItemParser(resources),
+                new ItemOptionsParser(resources),
+                new ItemOptionRangeParser(resources),
                 new MapEntityParser(resources),
+                new MapParser(resources),
                 new SkillParser(resources),
                 new InsigniaParser(resources),
                 new ExpParser(resources),
@@ -39,7 +42,28 @@ namespace GameDataParser
                 new ScriptParser(resources),
                 new GuildParser(resources),
                 new PrestigeParser(resources),
-                new AchieveParser(resources)
+                new TrophyParser(resources),
+                new RecipeParser(resources),
+                new MasteryParser(resources),
+                new NpcParser(resources),
+                new ChatStickerParser(resources),
+                new ShopParser(),
+                new ItemExchangeScrollParser(resources),
+                new MasteryFactorParser(resources),
+                new PremiumClubPackageParser(resources),
+                new PremiumClubDailyBenefitParser(resources),
+                new InstrumentInfoParser(resources),
+                new InstrumentCategoryInfoParser(resources),
+                new BeautyParser(),
+                new ColorPaletteParser(resources),
+                new GachaParser(resources),
+                new MeretMarketParser(),
+                new ItemExtractionParser(resources),
+                new FishParser(resources),
+                new FishingSpotParser(resources),
+                new FishingRodParser(resources),
+                new UGCMapParser(resources),
+                new FurnishingShopParser(resources)
             };
 
             IEnumerable<Task> tasks = exporters.Select(exporter => Task.Run(() => exporter.Export()));

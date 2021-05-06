@@ -205,7 +205,10 @@ namespace MapleServer2.Network
                     if (length <= 0)
                     {
                         if (!Connected())
+                        {
                             return;
+                        }
+
                         continue;
                     }
 
@@ -228,6 +231,7 @@ namespace MapleServer2.Network
                     {
                         case RecvOp.USER_SYNC:
                         case RecvOp.KEY_TABLE:
+                        case RecvOp.GUIDE_OBJECT_SYNC:
                             break;
                         default:
                             string packetString = packet.ToString();
@@ -275,6 +279,7 @@ namespace MapleServer2.Network
                 case SendOp.FIELD_ADD_USER:
                 case SendOp.FIELD_ENTRANCE:
                 case SendOp.SERVER_ENTER:
+                case SendOp.QUEST:
                     break;
                 default:
                     string packetString = packet.ToHexString(' ');
