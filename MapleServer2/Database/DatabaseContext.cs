@@ -20,12 +20,14 @@ namespace MapleServer2.Database
         public DbSet<Inventory> Inventories { get; set; }
         public DbSet<BankInventory> BankInventories { get; set; }
         public DbSet<Item> Items { get; set; }
-        public DbSet<Mailbox> MailBoxes { get; set; }
         public DbSet<Mail> Mails { get; set; }
         public DbSet<Buddy> Buddies { get; set; }
         public DbSet<QuestStatus> Quests { get; set; }
         public DbSet<Wallet> Wallets { get; set; }
-        // public DbSet<Guild> Guilds { get; set; }
+        public DbSet<Trophy> Trophies { get; set; }
+        public DbSet<Guild> Guilds { get; set; }
+        public DbSet<GuildMember> GuildMembers { get; set; }
+        public DbSet<GuildApplication> GuildApplications { get; set; }
         // public DbSet<Home> Homes { get; set; }
 
 
@@ -44,7 +46,7 @@ namespace MapleServer2.Database
             {
                 entity.HasKey(e => e.Id);
                 entity.Property(e => e.Username).IsRequired().HasMaxLength(25);
-                entity.Property(e => e.Password).IsRequired().HasMaxLength(255);
+                entity.Property(e => e.PasswordHash).IsRequired().HasMaxLength(255);
             });
 
             modelBuilder.Entity<Player>(entity =>
@@ -58,9 +60,8 @@ namespace MapleServer2.Database
                 entity.Property(e => e.HomeName).HasDefaultValue("").HasMaxLength(25);
                 entity.Property(e => e.PartyId);
                 entity.Property(e => e.ClubId);
-                entity.Property(e => e.GuildId);
-                entity.Property(e => e.GuildName).HasMaxLength(25).HasDefaultValue("");
-                entity.Property(e => e.GuildContribution);
+                entity.HasOne(e => e.Guild);
+                entity.HasOne(e => e.GuildMember);
                 entity.Property(e => e.ReturnMapId);
 
                 entity.Property(e => e.Titles).HasConversion(
@@ -111,16 +112,27 @@ namespace MapleServer2.Database
                     i => JsonConvert.SerializeObject(i),
                     i => i == null ? new int[3] : JsonConvert.DeserializeObject<int[]>(i));
 
+                entity.Property(e => e.GuildApplications).HasConversion(
+                    i => JsonConvert.SerializeObject(i),
+                    i => i == null ? new List<GuildApplication>() : JsonConvert.DeserializeObject<List<GuildApplication>>(i));
+
                 entity.HasMany(e => e.SkillTabs).WithOne(x => x.Player);
                 entity.HasOne(e => e.GameOptions);
                 entity.HasOne(e => e.Inventory);
                 entity.HasOne(e => e.BankInventory);
-                entity.HasOne(e => e.Mailbox);
                 entity.HasMany(e => e.BuddyList).WithOne(e => e.Player);
-                //TODO: Trophy Data
+                entity.HasMany(e => e.Trophies);
                 entity.HasOne(e => e.Levels);
                 entity.HasOne(e => e.Wallet);
                 entity.HasMany(e => e.QuestList).WithOne(e => e.Player);
+
+                entity.Property(e => e.UnlockedTaxis).HasConversion(
+                    i => JsonConvert.SerializeObject(i),
+                    i => i == null ? new List<int>() : JsonConvert.DeserializeObject<List<int>>(i));
+
+                entity.Property(e => e.UnlockedMaps).HasConversion(
+                    i => JsonConvert.SerializeObject(i),
+                    i => i == null ? new List<int>() : JsonConvert.DeserializeObject<List<int>>(i));
 
                 entity.Ignore(e => e.DismantleInventory);
                 entity.Ignore(e => e.LockInventory);
@@ -128,6 +140,7 @@ namespace MapleServer2.Database
                 entity.Ignore(e => e.FishAlbum);
                 entity.Ignore(e => e.FishingRod);
                 entity.Ignore(e => e.GatheringCount);
+                entity.Ignore(e => e.Mailbox);
             });
 
             modelBuilder.Entity<Levels>(entity =>
@@ -139,13 +152,58 @@ namespace MapleServer2.Database
                 entity.Ignore(e => e.Player);
             });
 
-            // modelBuilder.Entity<Guild>(entity =>
-            // {
-            //     entity.HasKey(e => e.Id);
-            //     entity.Property(e => e.Name).IsRequired().HasMaxLength(25);
-            //     entity.HasOne(e => e.Leader);
-            //     entity.HasMany(e => e.Members).WithOne(p => p.Guild);
-            // });
+            modelBuilder.Entity<Guild>(entity =>
+            {
+                entity.HasKey(e => e.Id);
+                entity.Property(e => e.Name).IsRequired().HasMaxLength(12);
+                entity.Property(e => e.CreationTimestamp);
+                entity.HasOne(e => e.Leader);
+                entity.Property(e => e.Capacity);
+                entity.HasMany(e => e.Members);
+                entity.Property(e => e.Ranks).HasConversion(
+                    i => JsonConvert.SerializeObject(i),
+                    i => i == null ? new GuildRank[6] : JsonConvert.DeserializeObject<GuildRank[]>(i));
+
+                entity.Property(e => e.Buffs).HasConversion(
+                    i => JsonConvert.SerializeObject(i),
+                    i => i == null ? new List<GuildBuff>() : JsonConvert.DeserializeObject<List<GuildBuff>>(i));
+
+                entity.Property(e => e.Services).HasConversion(
+                    i => JsonConvert.SerializeObject(i),
+                    i => i == null ? new List<GuildService>() : JsonConvert.DeserializeObject<List<GuildService>>(i));
+
+                entity.HasMany(e => e.GiftBank);
+                entity.HasMany(e => e.Applications);
+                entity.Property(e => e.Funds);
+                entity.Property(e => e.Exp);
+                entity.Property(e => e.Searchable);
+                entity.Property(e => e.Notice).HasDefaultValue("").HasMaxLength(300);
+                entity.Property(e => e.Emblem).HasDefaultValue("").HasMaxLength(50);
+                entity.Property(e => e.FocusAttributes);
+                entity.Property(e => e.HouseRank);
+                entity.Property(e => e.HouseTheme);
+            });
+
+            modelBuilder.Entity<GuildMember>(entity =>
+            {
+                entity.HasKey(e => e.Id);
+                entity.HasOne(e => e.Player);
+                entity.Property(e => e.Motto).HasDefaultValue("").HasMaxLength(50);
+                entity.Property(e => e.Rank);
+                entity.Property(e => e.DailyContribution);
+                entity.Property(e => e.ContributionTotal);
+                entity.Property(e => e.DailyDonationCount);
+                entity.Property(e => e.AttendanceTimestamp);
+                entity.Property(e => e.JoinTimestamp);
+            });
+
+            modelBuilder.Entity<GuildApplication>(entity =>
+            {
+                entity.HasKey(e => e.Id);
+                entity.Property(e => e.GuildId);
+                entity.Property(e => e.CharacterId);
+                entity.Property(e => e.CreationTimestamp);
+            });
 
             // modelBuilder.Entity<Home>(entity =>
             // {
@@ -189,17 +247,19 @@ namespace MapleServer2.Database
                     i => JsonConvert.SerializeObject(i),
                     i => i == null ? new Dictionary<InventoryTab, short>() : JsonConvert.DeserializeObject<Dictionary<InventoryTab, short>>(i));
 
-                entity.HasMany(e => e.DB_Items);
+                entity.HasMany(e => e.DB_Items).WithOne(x => x.Inventory);
 
                 entity.Ignore(e => e.Equips);
                 entity.Ignore(e => e.Cosmetics);
+                entity.Ignore(e => e.Items);
+                entity.Ignore(e => e.Badges);
             });
 
             modelBuilder.Entity<BankInventory>(entity =>
             {
                 entity.HasKey(e => e.Id);
                 entity.Property(e => e.ExtraSize);
-                entity.HasMany(e => e.DB_Items);
+                entity.HasMany(e => e.DB_Items).WithOne(x => x.BankInventory);
             });
 
             modelBuilder.Entity<Item>(entity =>
@@ -208,6 +268,9 @@ namespace MapleServer2.Database
                 entity.Property(e => e.Id);
                 entity.Property(e => e.Slot);
                 entity.Property(e => e.Amount);
+                entity.Property(e => e.Level);
+                entity.Property(e => e.Rarity);
+                entity.Property(e => e.PlayCount);
                 entity.Property(e => e.CreationTime);
                 entity.Property(e => e.ExpiryTime);
                 entity.Property(e => e.TimesAttributesChanged);
@@ -258,16 +321,23 @@ namespace MapleServer2.Database
                     i => JsonConvert.SerializeObject(i, settings),
                     i => i == null ? new ItemStats() : JsonConvert.DeserializeObject<ItemStats>(i, settings));
 
+                entity.Ignore(e => e.InventoryTab);
+                entity.Ignore(e => e.GemSlot);
+                entity.Ignore(e => e.StackLimit);
+                entity.Ignore(e => e.EnableBreak);
+                entity.Ignore(e => e.IsTwoHand);
+                entity.Ignore(e => e.IsDress);
+                entity.Ignore(e => e.IsTemplate);
+                entity.Ignore(e => e.IsCustomScore);
+                entity.Ignore(e => e.Gender);
+                entity.Ignore(e => e.FileName);
+                entity.Ignore(e => e.SkillId);
+                entity.Ignore(e => e.RecommendJobs);
                 entity.Ignore(e => e.Content);
                 entity.Ignore(e => e.Function);
                 entity.Ignore(e => e.AdBalloon);
-            });
-
-            modelBuilder.Entity<Mailbox>(entity =>
-            {
-                entity.HasKey(e => e.Id);
-                entity.HasOne(e => e.Player);
-                entity.HasMany(e => e.Mails);
+                entity.Ignore(e => e.Tag);
+                entity.Ignore(e => e.ShopID);
             });
 
             modelBuilder.Entity<Mail>(entity =>
@@ -277,6 +347,7 @@ namespace MapleServer2.Database
                 entity.Property(e => e.SenderName).HasMaxLength(25).HasDefaultValue("");
                 entity.Property(e => e.Title).HasMaxLength(25).HasDefaultValue("");
                 entity.Property(e => e.Body);
+                entity.HasOne(e => e.Player);
             });
 
             modelBuilder.Entity<Buddy>(entity =>
@@ -339,6 +410,21 @@ namespace MapleServer2.Database
                 entity.Property(e => e.Bank).HasConversion(
                     i => i.Amount,
                     i => new Currency(null, CurrencyType.Bank, i));
+            });
+
+            modelBuilder.Entity<Trophy>(entity =>
+            {
+                entity.HasKey(e => e.Uid);
+                entity.Property(e => e.Id);
+                entity.Property(e => e.NextGrade);
+                entity.Property(e => e.MaxGrade);
+                entity.Property(e => e.Counter);
+                entity.Property(e => e.Condition);
+                entity.Property(e => e.IsDone);
+                entity.Property(e => e.Type).HasMaxLength(25);
+                entity.Property(e => e.Timestamps).HasConversion(
+                    i => JsonConvert.SerializeObject(i),
+                    i => i == null ? new List<long>() : JsonConvert.DeserializeObject<List<long>>(i));
             });
         }
     }
