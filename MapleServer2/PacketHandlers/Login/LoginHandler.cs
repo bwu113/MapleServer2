@@ -1,14 +1,13 @@
-﻿using System;
-using System.Collections.Generic;
+﻿using System.Collections.Generic;
 using System.Collections.Immutable;
 using System.Net;
 using MaplePacketLib2.Tools;
 using MapleServer2.Constants;
 using MapleServer2.Database;
+using MapleServer2.Database.Types;
 using MapleServer2.Extensions;
 using MapleServer2.Packets;
 using MapleServer2.Servers.Login;
-using MapleServer2.Tools;
 using MapleServer2.Types;
 using Microsoft.Extensions.Logging;
 
@@ -38,17 +37,16 @@ namespace MapleServer2.PacketHandlers.Login
             string username = packet.ReadUnicodeString();
             string password = packet.ReadUnicodeString();
 
+            // Hash the password with BCrypt
+            string passwordHash = BCrypt.Net.BCrypt.HashPassword(password);
 
-            Account account = DatabaseManager.GetAccount(username, password);
+            // TODO: Change authenticate to return bool and add packet for wrong password
+            Account account = DatabaseManager.Authenticate(username, password);
 
             // Auto add new accounts
             if (account == default)
             {
-                account = new Account(GuidGenerator.Long(), username, password);
-                if (!DatabaseManager.Insert(account))
-                {
-                    throw new ArgumentException("Could not create account");
-                }
+                account = new Account(username, passwordHash);
             }
 
             Logger.Debug($"Logging in with account ID: {account.Id}");
@@ -59,10 +57,12 @@ namespace MapleServer2.PacketHandlers.Login
                 case 1:
                     PacketWriter pWriter = PacketWriter.Of(SendOp.NPS_INFO);
                     pWriter.WriteLong();
-                    pWriter.WriteUnicodeString("");
+                    pWriter.WriteUnicodeString(account.Username);
 
                     session.Send(pWriter);
-                    session.Send(BannerListPacket.SetBanner());
+
+                    List<Banner> banners = DatabaseManager.GetBanners();
+                    session.Send(BannerListPacket.SetBanner(banners));
                     session.Send(ServerListPacket.SetServers(ServerName, ServerIPs));
                     break;
                 case 2:

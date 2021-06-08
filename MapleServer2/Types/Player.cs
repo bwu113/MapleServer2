@@ -3,9 +3,9 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
 using Maple2Storage.Types;
-using Maple2Storage.Types.Metadata;
 using MapleServer2.Constants;
 using MapleServer2.Data.Static;
+using MapleServer2.Database;
 using MapleServer2.Enums;
 using MapleServer2.Packets;
 using MapleServer2.Servers.Game;
@@ -40,12 +40,14 @@ namespace MapleServer2.Types
         public int TitleId { get; set; }
         public short InsigniaId { get; set; }
         public List<int> Titles { get; set; }
+        public List<int> PrestigeRewardsClaimed { get; set; }
 
         public byte Animation;
         public PlayerStats Stats;
         public IFieldObject<Mount> Mount;
         public IFieldObject<Pet> Pet;
         public IFieldObject<GuideObject> Guide;
+        public IFieldObject<Instrument> Instrument;
 
         public long VIPExpiration { get; set; }
         public int SuperChat;
@@ -54,6 +56,9 @@ namespace MapleServer2.Types
         public int[] TrophyCount;
 
         public Dictionary<int, Trophy> TrophyData = new Dictionary<int, Trophy>();
+
+        // DB ONLY
+        public List<Trophy> Trophies;
 
         public List<ChatSticker> ChatSticker;
         public List<int> FavoriteStickers;
@@ -82,6 +87,8 @@ namespace MapleServer2.Types
         public long HomeExpiration; // if player does not have a purchased plot, home expiration needs to be set to a far away date
         public string HomeName;
 
+        public Mapleopoly Mapleopoly = new Mapleopoly();
+
         public int MaxSkillTabs { get; set; }
         public long ActiveSkillTabId { get; set; }
 
@@ -109,9 +116,9 @@ namespace MapleServer2.Types
         public int[] GroupChatId;
 
         // TODO: Rework to use Class Guild
-        public long GuildId;
-        public string GuildName;
-        public int GuildContribution;
+        public Guild Guild;
+        public GuildMember GuildMember;
+        public List<GuildApplication> GuildApplications = new List<GuildApplication>();
 
         public Dictionary<int, Fishing> FishAlbum = new Dictionary<int, Fishing>();
         public Item FishingRod; // Possibly temp solution?
@@ -125,6 +132,9 @@ namespace MapleServer2.Types
         private Task OnlineDurationThread;
         private TimeInfo Timestamps;
         public Dictionary<int, PlayerStat> GatheringCount = new Dictionary<int, PlayerStat>();
+
+        public List<int> UnlockedTaxis;
+        public List<int> UnlockedMaps;
 
         class TimeInfo
         {
@@ -143,17 +153,28 @@ namespace MapleServer2.Types
         public Player() { }
 
         // Initializes all values to be saved into the database
-        public Player(long accountId, long characterId, string name, byte gender, Job job)
+        public Player(long accountId, string name, byte gender, Job job, SkinColor skinColor)
         {
             AccountId = accountId;
-            CharacterId = characterId;
             Name = name;
             Gender = gender;
             Job = job;
             GameOptions = new GameOptions();
+            GameOptions.Initialize();
             Wallet = new Wallet(this, meso: 0, meret: 0, gameMeret: 0, eventMeret: 0, valorToken: 0, treva: 0, rue: 0,
                                 haviFruit: 0, mesoToken: 0, bank: 0);
-            Levels = new Levels(this, playerLevel: 1, exp: 0, restExp: 0, prestigeLevel: 1, prestigeExp: 0, new List<MasteryExp>());
+            Levels = new Levels(this, playerLevel: 1, exp: 0, restExp: 0, prestigeLevel: 1, prestigeExp: 0, new List<MasteryExp>()
+            { new MasteryExp(MasteryType.Fishing, 0, 0),
+            new MasteryExp(MasteryType.Performance, 0, 0),
+            new MasteryExp(MasteryType.Mining, 0, 0),
+            new MasteryExp(MasteryType.Foraging, 0, 0),
+            new MasteryExp(MasteryType.Ranching, 0, 0),
+            new MasteryExp(MasteryType.Farming, 0, 0),
+            new MasteryExp(MasteryType.Smithing, 0, 0),
+            new MasteryExp(MasteryType.Handicraft, 0, 0),
+            new MasteryExp(MasteryType.Alchemy, 0, 0),
+            new MasteryExp(MasteryType.Cooking, 0, 0),
+            new MasteryExp(MasteryType.PetTaming, 0, 0)});
             Timestamps = new TimeInfo(DateTimeOffset.UtcNow.ToUnixTimeSeconds());
             MapId = 52000065;
             Coord = CoordF.From(-675, 525, 600); // Intro map (52000065)
@@ -165,9 +186,10 @@ namespace MapleServer2.Types
             TitleId = 0;
             InsigniaId = 0;
             Titles = new List<int>();
+            PrestigeRewardsClaimed = new List<int>();
             ChatSticker = new List<ChatSticker>();
             FavoriteStickers = new List<int>();
-            Emotes = new List<int>();
+            Emotes = new List<int>() { 90200011, 90200004, 90200024, 90200041, 90200042, 90200057, 90200043, 90200022, 90200031, 90200005, 90200006, 90200003, 90200092, 90200077, 90200073, 90200023, 90200001, 90200019, 90200020, 90200021 };
             SkillTabs = new List<SkillTab> { new SkillTab(job) };
             StatPointDistribution = new StatDistribution(20);
             Inventory = new Inventory();
@@ -175,18 +197,29 @@ namespace MapleServer2.Types
             Mailbox = new Mailbox();
             BuddyList = new List<Buddy>();
             QuestList = new List<QuestStatus>();
-            GuildName = "";
             TrophyCount = new int[3] { 0, 0, 0 };
             ReturnMapId = (int) Map.Tria;
             ReturnCoord = CoordF.From(-900, -900, 3000);
             GroupChatId = new int[3];
+            SkinColor = skinColor;
+            UnlockedTaxis = new List<int>();
+            UnlockedMaps = new List<int>();
+            CharacterId = DatabaseManager.CreateCharacter(this);
         }
 
-        public void Warp(MapPlayerSpawn spawn, int mapId)
+        public void Warp(CoordF coord, CoordF rotation, int mapId)
         {
             MapId = mapId;
-            Coord = spawn.Coord.ToFloat();
-            Rotation = spawn.Rotation.ToFloat();
+            Coord = coord;
+            Rotation = rotation;
+            SafeBlock = coord;
+
+            if (!UnlockedMaps.Contains(MapId))
+            {
+                UnlockedMaps.Add(MapId);
+            }
+
+            DatabaseManager.UpdateCharacter(this);
             Session.Send(FieldPacket.RequestEnter(Session.FieldPlayer));
         }
 
@@ -299,7 +332,7 @@ namespace MapleServer2.Types
         {
             if (!TrophyData.ContainsKey(trophyId))
             {
-                TrophyData[trophyId] = new Trophy(trophyId);
+                TrophyData[trophyId] = new Trophy(this, trophyId);
             }
             TrophyData[trophyId].AddCounter(Session, addAmount);
             if (TrophyData[trophyId].Counter % sendUpdateInterval == 0)

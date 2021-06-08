@@ -162,8 +162,16 @@ namespace MapleServer2.Packets
                 pWriter.WriteInt(trophyCount);
             }
 
-            pWriter.WriteLong(player.GuildId);
-            pWriter.WriteUnicodeString(player.GuildName);
+            if (player.Guild != null)
+            {
+                pWriter.WriteLong(player.Guild.Id);
+                pWriter.WriteUnicodeString(player.Guild.Name);
+            }
+            else
+            {
+                pWriter.WriteLong();
+                pWriter.WriteUnicodeString("");
+            }
             pWriter.WriteUnicodeString(player.Motto);
 
             pWriter.WriteUnicodeString(player.ProfileUrl);
@@ -180,12 +188,12 @@ namespace MapleServer2.Packets
                     pWriter.WriteUnicodeString("club name");
                 }
             }
-            pWriter.WriteByte(); // groups?
-            for (int i = 0; i < 12; i++)
+            pWriter.WriteByte();
+            pWriter.WriteInt();
+            foreach (MasteryExp mastery in player.Levels.MasteryExp)
             {
-                pWriter.WriteInt(); // ???
+                pWriter.WriteInt((int) mastery.CurrentExp);
             }
-
 
             // Some function call on CCharacterList property
             pWriter.WriteUnicodeString("");
@@ -234,7 +242,7 @@ namespace MapleServer2.Packets
             pWriter.WriteInt(item.Id);
             pWriter.WriteLong(item.Uid);
             pWriter.WriteUnicodeString(slot.ToString());
-            pWriter.WriteInt(1);
+            pWriter.WriteInt(item.Rarity);
             pWriter.WriteItem(item);
         }
 

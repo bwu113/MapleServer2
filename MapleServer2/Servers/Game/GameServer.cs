@@ -1,6 +1,9 @@
-﻿using Autofac;
+﻿using System.Collections.Generic;
+using Autofac;
+using MapleServer2.Database;
 using MapleServer2.Network;
 using MapleServer2.Tools;
+using MapleServer2.Types;
 using Microsoft.Extensions.Logging;
 
 namespace MapleServer2.Servers.Game
@@ -22,6 +25,11 @@ namespace MapleServer2.Servers.Game
 
         public void Start()
         {
+            List<Guild> guilds = DatabaseManager.GetGuilds();
+            foreach (Guild guild in guilds)
+            {
+                GuildManager.AddGuild(guild);
+            }
             Start(PORT);
         }
     }

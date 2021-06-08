@@ -1,9 +1,9 @@
 ﻿using System;
 using System.Linq;
-using Maple2Storage.Types.Metadata;
 using MaplePacketLib2.Tools;
 using MapleServer2.Constants;
-using MapleServer2.Data.Static;
+using MapleServer2.Database;
+using MapleServer2.Database.Types;
 using MapleServer2.Packets;
 using MapleServer2.Servers.Game;
 using MapleServer2.Types;
@@ -20,6 +20,7 @@ namespace MapleServer2.PacketHandlers.Game
         private enum ShopMode : byte
         {
             Arena = 0x03,
+            Fishing = 0x04,
             ViaItem = 0x0A
         }
 
@@ -31,6 +32,9 @@ namespace MapleServer2.PacketHandlers.Game
             {
                 case ShopMode.ViaItem:
                     HandleViaItem(session, packet);
+                    break;
+                case ShopMode.Fishing:
+                    HandleFishingShop(session, packet);
                     break;
                 case ShopMode.Arena:
                     HandleMapleArenaShop(session, packet);
@@ -58,7 +62,7 @@ namespace MapleServer2.PacketHandlers.Game
                 return;
             }
 
-            ShopMetadata shop = ShopMetadataStorage.GetShop(item.ShopID);
+            Shop shop = DatabaseManager.GetShop(item.ShopID);
             if (shop == null)
             {
                 Console.WriteLine($"Unknown shop ID: {item.ShopID}");
@@ -73,6 +77,17 @@ namespace MapleServer2.PacketHandlers.Game
             session.Send(ShopPacket.Reload());
             session.Send(SystemShopPacket.Open());
         }
+        private static void HandleFishingShop(GameSession session, PacketReader packet)
+        {
+            bool openShop = packet.ReadBool();
+
+            if (!openShop)
+            {
+                return;
+            }
+
+            OpenSystemShop(session, 161);
+        }
 
         private static void HandleMapleArenaShop(GameSession session, PacketReader packet)
         {
@@ -83,7 +98,12 @@ namespace MapleServer2.PacketHandlers.Game
                 return;
             }
 
-            ShopMetadata shop = ShopMetadataStorage.GetShop(168);
+            OpenSystemShop(session, 168);
+        }
+
+        private static void OpenSystemShop(GameSession session, int shopId)
+        {
+            Shop shop = DatabaseManager.GetShop(shopId);
 
             session.Send(ShopPacket.Open(shop));
             foreach (ShopItem shopItem in shop.Items)
